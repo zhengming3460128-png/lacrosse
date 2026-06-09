@@ -1,0 +1,663 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>Calculus Lacrosse: Perfect Scale & Physics</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #fb923c; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; user-select: none; }
+        
+        #ui-layer { position: absolute; inset: 0; pointer-events: none; display: flex; flex-direction: column; justify-content: space-between; padding: 40px; transition: filter 1s ease; }
+        .frustrated-mode { filter: grayscale(90%) sepia(30%) brightness(0.5) contrast(1.5); }
+        
+        .hud-top { display: flex; justify-content: space-between; width: 100%; max-width: 1400px; margin: 0 auto; text-shadow: 0 4px 15px rgba(0,0,0,0.8); }
+        .hud-element { display: flex; flex-direction: column; }
+        .hud-element.right { align-items: flex-end; text-align: right; }
+        
+        .hud-label { color: rgba(255,255,255,0.8); font-size: 14px; font-weight: 900; letter-spacing: 4px; text-transform: uppercase; margin-bottom: 5px; }
+        .hud-value { font-family: 'Courier New', Courier, monospace; font-size: 68px; font-weight: bold; color: #fff; text-shadow: 0 0 20px rgba(255, 255, 255, 0.6); transition: color 0.1s, transform 0.1s; }
+        
+        .reticle{
+    		display:none;
+	}
+        
+        #feedback { position: absolute; top: 60%; left: 50%; transform: translate(-50%, 0); font-size: 40px; font-weight: 900; letter-spacing: 8px; color: #fff; opacity: 0; text-transform: uppercase; text-shadow: 0 5px 20px rgba(0,0,0,1); transition: opacity 0.1s, transform 0.2s; }
+        .fb-goal { color: #10b981 !important; transform: translate(-50%, -50px) scale(1.2) !important; }
+        .fb-post { color: #f59e0b !important; transform: translate(-50%, -20px) scale(1.1) !important; }
+        .fb-miss { color: #ef4444 !important; }
+        
+        .hud-bottom { display: flex; flex-direction: column; align-items: center; pointer-events: auto; }
+        .action-hint { color: #fff; font-size: 18px; font-weight: 800; letter-spacing: 5px; text-shadow: 0 0 15px rgba(0,0,0,0.8); animation: pulse 1.5s infinite; margin-bottom: 20px; }
+        @keyframes pulse { 0% { opacity: 0.3; } 50% { opacity: 1; } 100% { opacity: 0.3; } }
+        
+        .controls { background: rgba(15, 23, 42, 0.6); backdrop-filter: blur(8px); padding: 15px 30px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); width: 300px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); display: flex; flex-direction: column; gap: 12px; }
+        .slider-label { display: flex; justify-content: space-between; color: #fff; font-size: 14px; margin-bottom: 5px; font-weight: bold; }
+        input[type=range] { width: 100%; accent-color: #f59e0b; cursor: pointer; }
+        
+        .toggle-btn { background: transparent; border: 2px solid #38bdf8; color: #38bdf8; padding: 10px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 900; letter-spacing: 2px; text-transform: uppercase; transition: all 0.2s; text-align: center; }
+        .toggle-btn:hover { background: rgba(56, 189, 248, 0.2); }
+        .toggle-btn.active { background: #38bdf8; color: #0f172a; box-shadow: 0 0 15px rgba(56,189,248,0.5); }
+        
+        .vignette { position: absolute; inset: 0; background: radial-gradient(circle at center, transparent 30%, rgba(20,5,0,0.95) 150%); z-index: -1; }
+        
+        #start-screen { position: absolute; inset: 0; background: rgba(0,0,0,0.9); z-index: 100; display: flex; flex-direction: column; justify-content: center; align-items: center; cursor: pointer; color: white; transition: opacity 0.5s; }
+        .start-btn { font-size: 32px; font-weight: 900; letter-spacing: 10px; border: 2px solid white; padding: 20px 40px; border-radius: 8px; animation: pulse 1.5s infinite; text-align: center; }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+
+    <div id="start-screen" onclick="initGame()">
+        <div class="start-btn">START ENGINE</div>
+        <div style="margin-top: 20px; font-family: monospace; color: #94a3b8;">Click to initialize Web Audio Engine</div>
+    </div>
+
+    <div id="ui-layer">
+        <div class="vignette"></div>
+        <div class="hud-top">
+            <div class="hud-element">
+                <div class="hud-label">Shooting Angle</div>
+                <div class="hud-value" id="angleDisplay">0.00°</div>
+                <div style="color: rgba(255,255,255,0.8); font-size: 18px; margin-top: 10px; font-weight: bold; letter-spacing: 2px;">DIST: <span id="distDisplay">45.0</span> M</div>
+            </div>
+            <div class="hud-element right">
+                <div class="hud-label">Expected Goals (xG)</div>
+                <div class="hud-value" id="xgDisplay">0.1%</div>
+                <div style="color: #fcd34d; font-size: 18px; margin-top: 10px; font-weight: bold; letter-spacing: 2px;">ZONE: <span id="optYDisplay">3.80</span> M</div>
+            </div>
+        </div>
+        
+        <div class="reticle" id="crosshair"></div>
+        <div id="feedback"></div>
+        
+        <div class="hud-bottom">
+            <div class="action-hint" id="actionHint">PRESS [SPACE] OR [CLICK] TO SHOOT</div>
+            <div class="controls">
+                <div>
+                    <div class="slider-label"><span>LATERAL DIST (X)</span><span id="xDisplay" style="color: #fcd34d;">3.0 M</span></div>
+                    <input type="range" id="xSlider" min="1.0" max="10.0" step="0.1" value="3.0">
+                </div>
+                <div id="projectionToggle" class="toggle-btn">SHOW SHOOTING ANGLE</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ==========================================
+        // 0. 程序化音效引擎 (Web Audio API)
+        // ==========================================
+        let actx;
+        const AudioFX = {
+            init: function() { actx = new (window.AudioContext || window.webkitAudioContext)(); },
+            playNoise: function(duration, volume, type='white') {
+                if(!actx) return;
+                const bufferSize = actx.sampleRate * duration;
+                const buffer = actx.createBuffer(1, bufferSize, actx.sampleRate);
+                const data = buffer.getChannelData(0);
+                for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+                const noise = actx.createBufferSource(); noise.buffer = buffer;
+                
+                const filter = actx.createBiquadFilter();
+                filter.type = type === 'footstep' ? 'lowpass' : 'bandpass';
+                filter.frequency.value = type === 'footstep' ? 300 : 3000;
+
+                const gain = actx.createGain();
+                gain.gain.setValueAtTime(volume, actx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, actx.currentTime + duration);
+                
+                noise.connect(filter); filter.connect(gain); gain.connect(actx.destination);
+                noise.start();
+            },
+            ping: function() { 
+                if(!actx) return;
+                const osc1 = actx.createOscillator(); osc1.type = 'triangle';
+                const osc2 = actx.createOscillator(); osc2.type = 'sine';
+                osc1.frequency.setValueAtTime(1200, actx.currentTime);
+                osc2.frequency.setValueAtTime(1800, actx.currentTime);
+                osc1.frequency.exponentialRampToValueAtTime(800, actx.currentTime + 0.5);
+                
+                const gain = actx.createGain();
+                gain.gain.setValueAtTime(1.5, actx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, actx.currentTime + 0.5);
+                
+                osc1.connect(gain); osc2.connect(gain); gain.connect(actx.destination);
+                osc1.start(); osc2.start();
+                osc1.stop(actx.currentTime + 0.5); osc2.stop(actx.currentTime + 0.5);
+            },
+            cheer: function() {
+                if(!actx) return;
+                const osc = actx.createOscillator(); osc.type = 'sine';
+                osc.frequency.setValueAtTime(300, actx.currentTime);
+                osc.frequency.linearRampToValueAtTime(600, actx.currentTime + 1.0);
+                const gain = actx.createGain();
+                gain.gain.setValueAtTime(0, actx.currentTime);
+                gain.gain.linearRampToValueAtTime(0.2, actx.currentTime + 0.5);
+                gain.gain.linearRampToValueAtTime(0, actx.currentTime + 2.5);
+                osc.connect(gain); gain.connect(actx.destination);
+                osc.start(); osc.stop(actx.currentTime + 2.5);
+                this.playNoise(2.5, 0.3, 'white'); 
+            },
+            cry: function() {
+                if(!actx) return;
+                const osc = actx.createOscillator(); osc.type = 'triangle';
+                osc.frequency.setValueAtTime(500, actx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(300, actx.currentTime + 0.5);
+                const gain = actx.createGain();
+                gain.gain.setValueAtTime(0.15, actx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, actx.currentTime + 0.5);
+                osc.connect(gain); gain.connect(actx.destination);
+                osc.start(); osc.stop(actx.currentTime + 0.5);
+            }
+        };
+
+        function initGame() {
+            document.getElementById('start-screen').style.opacity = 0;
+            setTimeout(() => document.getElementById('start-screen').style.display = 'none', 500);
+            AudioFX.init();
+            gameStarted = true;
+        }
+
+        // ==========================================
+        // 1. 场景与夕阳反向采光系统
+        // ==========================================
+        let gameStarted = false;
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0xfb923c); 
+        scene.fog = new THREE.FogExp2(0xfb923c, 0.018);
+
+        const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap; 
+        renderer.toneMapping = THREE.ACESFilmicToneMapping; 
+        renderer.toneMappingExposure = 1.3;
+        document.body.appendChild(renderer.domElement);
+
+        // 太阳位于右后方，完美直射渲染物体正面亮部
+        const sun = new THREE.Mesh(new THREE.SphereGeometry(15, 32, 32), new THREE.MeshBasicMaterial({ color: 0xfffbeb }));
+        sun.position.set(60, 30, 100); 
+        scene.add(sun);
+
+        const hemiLight = new THREE.HemisphereLight(0xffedd5, 0x011f07, 0.4);
+        scene.add(hemiLight);
+
+        const dirLight = new THREE.DirectionalLight(0xfcd34d, 2.5); 
+        dirLight.position.copy(sun.position); 
+        dirLight.castShadow = true;
+        dirLight.shadow.mapSize.width = 2048; dirLight.shadow.mapSize.height = 2048;
+        dirLight.shadow.camera.near = 0.5; dirLight.shadow.camera.far = 300;
+        dirLight.shadow.camera.left = -100; dirLight.shadow.camera.right = 100;
+        dirLight.shadow.camera.top = 100; dirLight.shadow.camera.bottom = -100;
+        dirLight.shadow.bias = -0.001;
+        scene.add(dirLight);
+
+        // ==========================================
+        // 2. 环境构建：25万根暴密动漫高低草层
+        // ==========================================
+        const d = 1.83; 
+        let x_path = 3.0; 
+        let optimal_z = Math.sqrt(x_path * (x_path + d));
+
+        // 极深墨绿色土壤底层，配合高密度草防止露白
+        const ground = new THREE.Mesh(new THREE.PlaneGeometry(300, 300), new THREE.MeshLambertMaterial({ color: 0x011a08 }));
+        ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; scene.add(ground);
+
+        const grassCount = 250000; 
+        const grassGeo = new THREE.PlaneGeometry(0.1, 0.3);
+        grassGeo.translate(0, 0.175, 0); 
+        const grassMat = new THREE.MeshLambertMaterial({ color: 0xeab308, side: THREE.DoubleSide }); 
+        
+        grassMat.onBeforeCompile = (shader) => {
+            shader.uniforms.time = { value: 0 };
+            grassMat.userData.shader = shader;
+            shader.vertexShader = `uniform float time;\n` + shader.vertexShader;
+            shader.vertexShader = shader.vertexShader.replace(
+                `#include <begin_vertex>`,
+                `vec3 transformed = vec3( position );
+                vec4 worldPos = instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0);
+                float wind = sin(worldPos.x * 0.1 + time) * cos(worldPos.z * 0.1 + time * 0.8) * 0.4;
+                transformed.x += wind * uv.y * uv.y; 
+                transformed.z += wind * uv.y * uv.y;`
+            );
+        };
+        const grassMesh = new THREE.InstancedMesh(grassGeo, grassMat, grassCount);
+        grassMesh.castShadow = true; grassMesh.receiveShadow = true;
+        const dummy = new THREE.Object3D();
+        for(let i=0; i<grassCount; i++){
+            dummy.position.set((Math.random()-0.5)*120, 0, (Math.random()-0.2)*150);
+            dummy.rotation.y = Math.random() * Math.PI;
+            
+            // 92% 为标准矮密草，8% 为动漫特色高挺草（高2-3倍），杜绝单一化
+            let h = Math.random() > 0.7 ? 1.8 + Math.random()*1.0 : 0.6 + Math.random()*0.3;
+            dummy.scale.set(0.6 + Math.random()*0.4, h, 1);
+            dummy.updateMatrix(); grassMesh.setMatrixAt(i, dummy.matrix);
+        }
+        scene.add(grassMesh);
+
+        const lineMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.4 });
+        for(let z = 0; z <= 100; z += 10) {
+            const yardLine = new THREE.Mesh(new THREE.PlaneGeometry(60, 0.15), lineMat);
+            yardLine.rotation.x = -Math.PI / 2; yardLine.position.set(0, 0.01, z); scene.add(yardLine);
+        }
+
+        const zoneGeo = new THREE.CylinderGeometry(1.2, 1.2, 30, 32);
+        zoneGeo.translate(0, 15, 0);
+        const zoneMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.15, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
+        const optimalBeam = new THREE.Mesh(zoneGeo, zoneMat);
+        optimalBeam.position.set(x_path + d/2, 0, optimal_z); 
+        scene.add(optimalBeam);
+
+        const goalGroup = new THREE.Group();
+        const pipeMat = new THREE.MeshStandardMaterial({ color: 0xffffff, metalness: 0.8, roughness: 0.2 }); 
+        const pLeft = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 1.83), pipeMat); pLeft.position.set(-d/2, 1.83/2, 0); pLeft.castShadow=true;
+        const pRight = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 1.83), pipeMat); pRight.position.set(d/2, 1.83/2, 0); pRight.castShadow=true;
+        const pTop = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, d), pipeMat); pTop.rotation.z = Math.PI/2; pTop.position.set(0, 1.83, 0); pTop.castShadow=true;
+        const netBack = new THREE.Mesh(new THREE.PlaneGeometry(d, 1.83), new THREE.MeshBasicMaterial({color:0xffffff, wireframe:true, transparent:true, opacity:0.3})); netBack.position.set(0, 1.83/2, -1.0);
+        goalGroup.add(pLeft, pRight, pTop, netBack);
+        goalGroup.position.set(d/2, 0, 0); 
+        scene.add(goalGroup);
+
+        const cheerleaders = [];
+        const clSkin = new THREE.MeshLambertMaterial({color: 0xfbcfe8});
+        const clDress = new THREE.MeshLambertMaterial({color: 0xec4899});
+        const clPom = new THREE.MeshBasicMaterial({color: 0x38bdf8});
+        for(let i=0; i<6; i++) {
+            const cl = new THREE.Group();
+            const body = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.25, 0.8), clDress); body.position.y = 0.6; body.castShadow = true;
+            const head = new THREE.Mesh(new THREE.SphereGeometry(0.18), clSkin); head.position.y = 1.15; head.castShadow = true;
+            const armL = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.5), clSkin); armL.rotation.z = 0.5; armL.position.set(-0.25, 0.8, 0);
+            const armR = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.5), clSkin); armR.rotation.z = -0.5; armR.position.set(0.25, 0.8, 0);
+            const pomL = new THREE.Mesh(new THREE.SphereGeometry(0.15), clPom); pomL.position.set(-0.4, 1.0, 0);
+            const pomR = new THREE.Mesh(new THREE.SphereGeometry(0.15), clPom); pomR.position.set(0.4, 1.0, 0);
+            cl.add(body, head, armL, armR, pomL, pomR); 
+            cl.position.set(-6 - i*1.2, 0, 15 + i*4); scene.add(cl);
+            cheerleaders.push({ mesh: cl, offset: Math.random() * Math.PI * 2, pomL, pomR });
+        }
+
+        const playerRig = new THREE.Group();
+        scene.add(playerRig);
+        
+        // 【绝对比例彻底修复】：将摄像机搭载基座坐标清零，杜绝多帧叠加引起的“巨人症”
+        const camBase = new THREE.Group();
+        camBase.position.set(0, 0, 0); 
+        playerRig.add(camBase);
+        camBase.add(camera);
+
+        const armsRig = new THREE.Group();
+        camera.add(armsRig); 
+        
+        // 微调FPS悬浮第一人称手臂尺寸，从空间占比上解除视觉畸变
+        armsRig.scale.set(0.25, 0.25, 0.25);
+        armsRig.position.set(0, -0.15, -0.05);
+
+        const armSkin = new THREE.MeshLambertMaterial({ color: 0xfbcfe8 });
+        const gloveMat = new THREE.MeshLambertMaterial({ color: 0x1e293b });
+
+        const rightArm = new THREE.Group();
+        const rArmMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.03, 0.6), armSkin); rArmMesh.rotation.x = -Math.PI / 2; rArmMesh.position.z = -0.2; rArmMesh.castShadow = true; 
+        const rGlove = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.15), gloveMat); rGlove.rotation.x = -Math.PI / 2; rGlove.position.z = -0.55; rGlove.castShadow = true;
+        rightArm.add(rArmMesh, rGlove);
+
+        const leftArm = new THREE.Group();
+        const lArmMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.03, 0.6), armSkin); lArmMesh.rotation.x = -Math.PI / 2; lArmMesh.position.z = -0.2; lArmMesh.castShadow = true;
+        const lGlove = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.15), gloveMat); lGlove.rotation.x = -Math.PI / 2; lGlove.position.z = -0.55; lGlove.castShadow = true;
+        leftArm.add(lArmMesh, lGlove);
+
+        armsRig.add(rightArm, leftArm);
+
+        const stick = new THREE.Group();
+        const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 1.8), new THREE.MeshLambertMaterial({color: 0x1e293b})); shaft.rotation.x = -Math.PI / 2; shaft.castShadow = true;
+        const headFrame = new THREE.Mesh(new THREE.TorusGeometry(0.1, 0.015, 8, 24), new THREE.MeshLambertMaterial({color: 0xffffff})); headFrame.position.set(0, 0, -0.9); headFrame.rotation.x = Math.PI / 2;
+        const pocket = new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 8, 0, Math.PI), new THREE.MeshBasicMaterial({color:0x94a3b8, wireframe:true})); pocket.position.set(0,-0.04,-0.9); pocket.rotation.x = Math.PI/2;
+        const dummyBall = new THREE.Mesh(new THREE.SphereGeometry(0.05), new THREE.MeshLambertMaterial({color: 0xffffff})); dummyBall.position.set(0, 0, -0.9);
+        stick.add(shaft, headFrame, pocket, dummyBall);
+        stick.position.set(0,0,-0.55);
+        rightArm.add(stick);
+
+        const ballPhys = new THREE.Mesh(new THREE.SphereGeometry(0.05), new THREE.MeshLambertMaterial({ color: 0xffffff }));
+        ballPhys.castShadow = true; scene.add(ballPhys);
+
+        const MAX_TRAIL_POINTS = 40;
+        const trailGeo = new THREE.BufferGeometry();
+        const trailPos = new Float32Array(MAX_TRAIL_POINTS * 3);
+        trailGeo.setAttribute('position', new THREE.BufferAttribute(trailPos, 3));
+        const trailMat = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.6 });
+        const trailLine = new THREE.Line(trailGeo, trailMat);
+        scene.add(trailLine);
+        let trailIndex = 0;
+
+        const tears = [];
+        const tearGeo = new THREE.SphereGeometry(0.02);
+        const tearMat = new THREE.MeshBasicMaterial({ color: 0x7dd3fc, transparent: true, opacity: 0.9 });
+
+        // ==========================================
+        // 动态入射角全息投影雷达网
+        // ==========================================
+        let showProjection = false;
+        const projGeo = new THREE.BufferGeometry();
+        const projVertices = new Float32Array(9); 
+        projGeo.setAttribute('position', new THREE.BufferAttribute(projVertices, 3));
+        const projMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.3, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending });
+        const projMesh = new THREE.Mesh(projGeo, projMat);
+        projMesh.visible = false;
+        scene.add(projMesh);
+
+        document.getElementById('projectionToggle').addEventListener('click', function() {
+            showProjection = !showProjection;
+            this.classList.toggle('active');
+            projMesh.visible = showProjection;
+        });
+
+        // ==========================================
+        // 4. 物理参数与状态机
+        // ==========================================
+        let playerZ = 45; 
+        let current_xG = 0;
+        let state = "RUNNING"; 
+        let shootPhase = 0; let swingT = 0; let frustrationT = 0;
+        
+        let currentSpeed = 0.0; 
+        const MAX_SPEED = 14.0;
+
+        let ballActive = false;
+        let ballHasHit = false; 
+        let shotOutcome = 'miss'; 
+        let ballPos = new THREE.Vector3();
+        let ballVel = new THREE.Vector3();
+
+        function triggerShoot() {
+            if(!gameStarted) return;
+            if(state === "RUNNING") {
+                state = "SHOOTING";
+                shootPhase = 1; swingT = 0;
+                dummyBall.visible = true; ballActive = false; ballHasHit = false; ballPhys.position.set(0, -100, 0);
+                document.getElementById('actionHint').style.opacity = 0;
+                
+                trailIndex = 0;
+                for(let i=0; i<MAX_TRAIL_POINTS*3; i++) trailPos[i] = 0;
+                trailGeo.attributes.position.needsUpdate = true;
+            }
+        }
+        window.addEventListener('keydown', (e) => { if(e.code === 'Space') { e.preventDefault(); triggerShoot(); } });
+        window.addEventListener('pointerdown', (e) => { 
+            if(e.target.tagName !== 'INPUT' && e.target.id !== 'start-screen' && !e.target.classList.contains('toggle-btn')) triggerShoot(); 
+        });
+
+        function flashFeedback(msg, type) {
+            const fb = document.getElementById('feedback');
+            fb.innerText = msg; 
+            fb.className = type === 'goal' ? 'fb-goal' : (type === 'post' ? 'fb-post' : 'fb-miss');
+            fb.style.opacity = 1;
+            setTimeout(() => { fb.style.opacity = 0; fb.className = ''; }, 2000);
+        }
+
+        document.getElementById('xSlider').addEventListener('input', (e) => {
+            x_path = parseFloat(e.target.value);
+            optimal_z = Math.sqrt(x_path * (x_path + d));
+            optimalBeam.position.set(x_path + d/2, 0, optimal_z);
+            document.getElementById('xDisplay').innerText = x_path.toFixed(1) + " M";
+            document.getElementById('optYDisplay').innerText = optimal_z.toFixed(2);
+        });
+
+        // ==========================================
+        // 5. 核心帧更新循环
+        // ==========================================
+        const clock = new THREE.Clock();
+        let lastStepTime = 0;
+
+        function animate() {
+            requestAnimationFrame(animate);
+            if(!gameStarted) { renderer.render(scene, camera); return; }
+
+            const dt = Math.min(clock.getDelta(), 0.1);
+            const time = clock.getElapsedTime();
+
+            if(grassMat.userData.shader) grassMat.userData.shader.uniforms.time.value = time;
+            cheerleaders.forEach(cl => { 
+                cl.mesh.position.y = Math.max(0, Math.sin(time * 8 + cl.offset) * 0.5); 
+                cl.pomL.position.y = 1.0 + Math.sin(time * 15 + cl.offset) * 0.2;
+                cl.pomR.position.y = 1.0 + Math.cos(time * 15 + cl.offset) * 0.2;
+            });
+
+            const currentX = x_path + d/2;
+            playerRig.position.set(currentX, 0, playerZ);
+            playerRig.lookAt(new THREE.Vector3(d/2, 0, 0));
+            playerRig.rotateY(Math.PI); 
+
+            // 在世界空间内动态计算并绘制玩家与门柱的连线锥形区域
+            if (showProjection) {
+                const p = projGeo.attributes.position.array;
+                p[0] = currentX; p[1] = 0.05; p[2] = playerZ; 
+                p[3] = 0;        p[4] = 0.05; p[5] = 0;       
+                p[6] = d;        p[7] = 0.05; p[8] = 0;       
+                projGeo.attributes.position.needsUpdate = true;
+            }
+
+            // 基础视线定死在精准人眼标线 1.65 米
+            let camPitch = 0, camYaw = 0, camRoll = 0, camY = 1.65, camX = 0;
+            let armDropY = -0.2;
+            let rArmPosX = 0.2, rArmPosY = -0.3, rArmPosZ = -0.2; 
+            let lArmPosX = -0.3, lArmPosY = -0.4, lArmPosZ = -0.3; 
+            let rArmX = 0, rArmY = 0, rArmZ = 0;
+            let lArmX = 0, lArmY = 0, lArmZ = 0;
+            let stickX = 0, stickY = 0, stickZ = 0;
+
+            if (state === "RUNNING") {
+                currentSpeed += (MAX_SPEED - currentSpeed) * dt * 2.0;
+                playerZ -= currentSpeed * dt;
+
+                if (time - lastStepTime > 0.3) {
+                    AudioFX.playNoise(0.1, 0.1, 'footstep'); lastStepTime = time;
+                }
+
+                if (playerZ < 0) { 
+                    state = "FRUSTRATED"; frustrationT = 0;
+                    document.getElementById('ui-layer').classList.add('frustrated-mode');
+                    document.getElementById('actionHint').innerText = "OPPORTUNITY MISSED";
+                    document.getElementById('actionHint').style.opacity = 1;
+                }
+
+                camY = 1.65 + Math.sin(time * 15) * 0.08;
+                camX = Math.cos(time * 7.5) * 0.04;
+                camRoll = Math.cos(time * 7.5) * 0.015;
+
+                rArmPosX = 0.2; rArmPosY = -0.1; rArmPosZ = -0.25; 
+                lArmPosX = -0.3; lArmPosY = -0.4; lArmPosZ = -0.3; 
+                rArmX = 0.6; rArmY = -0.3; 
+                stickZ = Math.sin(time * 25) * 0.3; 
+                lArmX = 0.3; lArmY = 0.5;
+
+            } 
+            else if (state === "SHOOTING") {
+                currentSpeed = THREE.MathUtils.lerp(currentSpeed, 0.0, dt * 6);
+                playerZ -= currentSpeed * dt;
+
+                if (shootPhase === 1) { 
+                    swingT += dt * 6;
+                    rArmPosX = THREE.MathUtils.lerp(0.2, 0.35, swingT);
+                    rArmPosY = THREE.MathUtils.lerp(-0.1, -0.3, swingT);
+                    rArmX = THREE.MathUtils.lerp(0.6, -1.0, swingT); 
+                    rArmY = THREE.MathUtils.lerp(-0.3, -0.5, swingT);
+
+                    lArmPosX = THREE.MathUtils.lerp(-0.3, -0.35, swingT);
+                    lArmX = THREE.MathUtils.lerp(0.3, -0.8, swingT);
+                    stickX = THREE.MathUtils.lerp(0, -0.6, swingT);
+                    
+                    if(swingT >= 1) {
+                        shootPhase = 2; swingT = 0;
+                        AudioFX.playNoise(0.5, 0.4, 'white'); 
+                        
+                        const roll = Math.random() * 100;
+                        if (roll <= current_xG) shotOutcome = 'goal';
+                        else shotOutcome = Math.random() > 0.5 ? 'post' : 'miss'; 
+
+                        dummyBall.getWorldPosition(ballPos);
+                        dummyBall.visible = false; ballActive = true;
+                        
+                        const flightTime = Math.abs(playerZ) / 30.0; 
+                        let targetX, targetY;
+                        
+                        if(shotOutcome === 'goal') {
+                            targetX = (Math.random()-0.5)*d*0.8 + d/2; 
+                            targetY = Math.random()*1.5 + 0.2;
+                        } else if(shotOutcome === 'post') {
+                            targetX = Math.random() > 0.5 ? d/2 - d/2 : d/2 + d/2; 
+                            targetY = Math.random()*1.5 + 0.2;
+                        } else {
+                            targetX = (Math.random()>0.5?1:-1)*(d/2 + 2 + Math.random()*3) + d/2; 
+                            targetY = Math.random()*3.0 + 1.0;
+                        }
+
+                        ballVel.z = -Math.abs(ballPos.z) / flightTime;
+                        ballVel.x = (targetX - ballPos.x) / flightTime;
+                        ballVel.y = (targetY - ballPos.y + 0.5 * 20.0 * flightTime * flightTime) / flightTime;
+                    }
+                } 
+                else if (shootPhase === 2) { 
+                    swingT += dt * 25;
+                    rArmPosX = 0.35; rArmPosY = -0.3;
+                    rArmX = THREE.MathUtils.lerp(-1.0, 1.5, swingT); 
+                    lArmX = THREE.MathUtils.lerp(-0.8, 0.5, swingT);
+                    stickX = THREE.MathUtils.lerp(-0.6, 1.2, swingT);
+                    
+                    camPitch = swingT * 0.15; camYaw = -swingT * 0.08;
+
+                    if(swingT >= 1) { shootPhase = 3; swingT = 0; }
+                } 
+                else if (shootPhase === 3) { 
+                    swingT += dt * 4;
+                    rArmPosX = 0.35; rArmPosY = -0.3;
+                    rArmX = THREE.MathUtils.lerp(1.5, 0.2, swingT);
+                    lArmX = THREE.MathUtils.lerp(0.5, 0.1, swingT);
+                    stickX = THREE.MathUtils.lerp(1.2, 0, swingT);
+                    
+                    camPitch = 0.15 * (1 - swingT); camYaw = -0.08 * (1 - swingT);
+
+                    if(swingT >= 1) {
+                        setTimeout(() => { 
+                            state = "RUNNING"; playerZ = 45; currentSpeed = 0; dummyBall.visible = true; document.getElementById('actionHint').style.opacity = 1; 
+                        }, 2500); 
+                        shootPhase = 0;
+                    }
+                }
+            } 
+            else if (state === "FRUSTRATED") { 
+                frustrationT += dt;
+                currentSpeed = Math.max(0, currentSpeed - dt * 25); 
+                playerZ -= currentSpeed * dt;
+
+                rArmPosX = 0.35; rArmPosY = -0.3; lArmPosX = -0.35; lArmPosY = -0.3;
+                rArmX = 1.0; stickX = 1.5; 
+                
+                lArmX = -2.8; lArmY = 0.8; lArmZ = 0.5; 
+                rArmPosX = -0.1; rArmX = -2.8; rArmY = -0.8; rArmZ = -0.5; 
+
+                camPitch = -1.2; 
+                camY = THREE.MathUtils.lerp(camY, 0.6, 0.05); 
+                
+                if(frustrationT > 1.0) {
+                    camY += Math.sin(time * 30) * 0.02;
+                    if(Math.random() < 0.02) AudioFX.cry();
+                }
+
+                if (frustrationT > 1.5 && Math.random() < 0.3) {
+                    const tear = new THREE.Mesh(tearGeo, tearMat);
+                    const spawnPos = new THREE.Vector3((Math.random()-0.5)*0.2, -0.3, -0.4);
+                    spawnPos.applyMatrix4(camera.matrixWorld);
+                    tear.position.copy(spawnPos); tear.velocity = -1.0 - Math.random();
+                    scene.add(tear); tears.push(tear);
+                }
+
+                if (frustrationT > 6.0) {
+                    state = "RUNNING"; playerZ = 45; currentSpeed = 0;
+                    document.getElementById('ui-layer').classList.remove('frustrated-mode');
+                    document.getElementById('actionHint').innerText = "PRESS [SPACE] OR [CLICK] TO SHOOT";
+                }
+            }
+
+            for(let i = tears.length - 1; i >= 0; i--) {
+                tears[i].position.y += tears[i].velocity * dt;
+                if(tears[i].position.y < 0.05) { scene.remove(tears[i]); tears.splice(i, 1); }
+            }
+
+            // 【应用各节点绝对数据】：杜绝多维矩阵重叠引起的视高异常
+            camera.position.set(camX, camY, 0);
+            camera.rotation.set(camPitch, camYaw, camRoll);
+            armsRig.position.set(0, armDropY, 0);
+            
+            rightArm.position.set(rArmPosX, rArmPosY, rArmPosZ);
+            rightArm.rotation.set(rArmX, rArmY, rArmZ);
+            
+            leftArm.position.set(lArmPosX, lArmPosY, lArmPosZ);
+            leftArm.rotation.set(lArmX, lArmY, lArmZ);
+            
+            stick.rotation.set(stickX, stickY, stickZ);
+
+            if (ballActive) {
+                ballVel.y -= 20.0 * dt; 
+                ballPos.addScaledVector(ballVel, dt);
+                
+                trailPos[trailIndex*3] = ballPos.x;
+                trailPos[trailIndex*3+1] = ballPos.y;
+                trailPos[trailIndex*3+2] = ballPos.z;
+                trailIndex++;
+                if(trailIndex >= MAX_TRAIL_POINTS) trailIndex = 0;
+                trailGeo.setDrawRange(0, MAX_TRAIL_POINTS);
+                trailGeo.attributes.position.needsUpdate = true;
+
+                if (ballPos.y < 0.05) { ballPos.y = 0.05; ballVel.y *= -0.5; ballVel.x *= 0.7; ballVel.z *= 0.7; }
+                
+                if (!ballHasHit && ballPos.z <= 0.2) {
+                    ballHasHit = true;
+                    if(shotOutcome === 'goal') {
+                        ballVel.z *= -0.1; ballVel.x *= 0.2; ballPos.z = -0.2; 
+                        AudioFX.playNoise(0.4, 0.5, 'white'); 
+                        AudioFX.cheer(); 
+                        flashFeedback("GOAL!", 'goal');
+                    } else if(shotOutcome === 'post') {
+                        ballVel.z *= -0.8; ballVel.x *= -1.5; ballVel.y *= 1.5; ballPos.z = 0.3; 
+                        AudioFX.ping(); 
+                        flashFeedback("HIT POST!", 'post');
+                    } else {
+                        flashFeedback("MISSED SHOT", 'miss');
+                    }
+                }
+                
+                ballPhys.position.copy(ballPos);
+            }
+
+            const tanTheta = (d * playerZ) / (Math.pow(playerZ, 2) + x_path * (x_path + d));
+            const angleDeg = Math.max(0, Math.atan(tanTheta) * (180 / Math.PI));
+            const distToOpt = Math.abs(playerZ - optimal_z);
+            current_xG = Math.exp(-Math.pow(distToOpt, 2) / 30) * 98.9 + 1.0; 
+
+            document.getElementById('distDisplay').innerText = Math.max(0, playerZ).toFixed(1);
+            document.getElementById('angleDisplay').innerText = angleDeg.toFixed(2) + "°";
+            const elXG = document.getElementById('xgDisplay');
+            elXG.innerText = current_xG.toFixed(1) + "%";
+
+            if (current_xG > 90.0) { 
+                elXG.style.color = "#f43f5e"; elXG.style.transform = "scale(1.2)";
+                document.getElementById('crosshair').style.background = "#f43f5e";
+                document.getElementById('crosshair').style.transform = "translate(-50%, -50%) scale(3)";
+                optimalBeam.material.opacity = 0.4; 
+            } else {
+                elXG.style.color = "#fff"; elXG.style.transform = "scale(1)";
+                document.getElementById('crosshair').style.background = "#fff";
+                document.getElementById('crosshair').style.transform = "translate(-50%, -50%) scale(1)";
+                optimalBeam.material.opacity = 0.15;
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        animate();
+    </script>
+</body>
+</html>
